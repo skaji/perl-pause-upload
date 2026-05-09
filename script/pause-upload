@@ -1,0 +1,41 @@
+#!perl
+use v5.42;
+
+use HTTP::Tiny::Multipart;
+use HTTP::Tiny;
+use JSON::PP ();
+use Path::Tiny ();
+
+my sub content_type_for ($path) {
+    my $filename = $path->basename;
+    return 'application/json' if $filename =~ /\.json\z/i;
+    return 'application/gzip' if $filename =~ /\.tar\.gz\z/i;
+    return 'application/octet-stream';
+}
+
+my sub pause_upload ($path) {
+    state $url = 'https://pause.perl.org/api/upload';
+    state $token = $ENV{PAUSE_TOKEN} or die "Need PAUSE_TOKEN\n";
+    state $http = HTTP::Tiny->new(verify_SSL => 1);
+    my %file = (
+        filename => $path->basename,
+        content => $path->slurp_raw,
+        content_type => content_type_for($path),
+    );
+    my %header = (
+        Authorization => "Bearer $token",
+        Accept => 'application/json',
+    );
+    $http->post_multipart($url, { file => \%file }, { headers => \%header });
+}
+
+my @file = @ARGV ;
+die "Need file arguments.\n" if !@file;
+
+for my $file (@file) {
+    my $res = pause_upload Path::Tiny->new($file);
+    my $json = JSON::PP->new->utf8->pretty->canonical;
+    my $content = eval { $json->decode($res->{content}) };
+    print $json->encode($content || $res);
+    die "FAIL\n" if !$res->{success};
+}
